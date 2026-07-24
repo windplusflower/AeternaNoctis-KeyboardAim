@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>AeternaKeyboardAim</AssemblyName>
+    <RootNamespace>AeternaKeyboardAim</RootNamespace>
+    <Version>1.0.8</Version>
+    <AssemblyVersion>1.0.8.0</AssemblyVersion>
+    <FileVersion>1.0.8.0</FileVersion>
+    <GameDir Condition="'$(GameDir)' == ''">$(AETERNA_NOCTIS_GAME_DIR)</GameDir>
+    <ManagedDir>$(GameDir)\Aeterna Noctis_Data\Managed</ManagedDir>
+    <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(GameDir)\BepInEx\core</BepInExCoreDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCoreDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Rewired_Core">
+      <HintPath>$(ManagedDir)\Rewired_Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(ManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateLocalReferences" BeforeTargets="ResolveReferences">
+    <Error
+      Condition="'$(GameDir)' == ''"
+      Text="Set GameDir with -p:GameDir=&quot;...\Aeterna Noctis&quot; or define AETERNA_NOCTIS_GAME_DIR." />
+    <Error
+      Condition="!Exists('$(ManagedDir)\Assembly-CSharp.dll')"
+      Text="Could not find the Aeterna Noctis managed assemblies under '$(ManagedDir)'." />
+    <Error
+      Condition="!Exists('$(BepInExCoreDir)\BepInEx.dll')"
+      Text="Could not find BepInEx 5 under '$(BepInExCoreDir)'." />
+  </Target>
+</Project>
