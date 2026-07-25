@@ -15,10 +15,8 @@ namespace AeternaKeyboardAim
     {
         public const string PluginGuid = "cn.codex.aeternanoctis.keyboardaim";
         public const string PluginName = "Aeterna Noctis Keyboard Aim";
-        public const string PluginVersion = "1.0.8";
+        public const string PluginVersion = "1.1.0";
 
-        internal static ConfigEntry<float> RotationSpeed;
-        internal static ConfigEntry<float> InputDeadZone;
         internal static ConfigEntry<bool> EnableWasdFallback;
         internal static ConfigEntry<KeyCode> FallbackUpKey;
         internal static ConfigEntry<KeyCode> FallbackDownKey;
@@ -31,18 +29,6 @@ namespace AeternaKeyboardAim
         private void Awake()
         {
             Log = Logger;
-
-            RotationSpeed = Config.Bind(
-                "Keyboard Aim",
-                "RotationSpeedDegreesPerSecond",
-                60f,
-                "Fixed bow rotation speed. The default is 90 degrees over the game's base 1.5-second aim window and does not change with bullet-time extension perks.");
-
-            InputDeadZone = Config.Bind(
-                "Keyboard Aim",
-                "InputDeadZone",
-                0.25f,
-                "Movement input magnitude required before keyboard aiming takes control for the current shot.");
 
             EnableWasdFallback = Config.Bind(
                 "Keyboard Aim",
@@ -61,7 +47,9 @@ namespace AeternaKeyboardAim
             _harmony.PatchAll(typeof(ShootDirectionPatch));
             _harmony.PatchAll(typeof(BowControllerUpdatePatch));
 
-            Logger.LogInfo("Keyboard bow aiming enabled. It follows the game's Horizontal/Vertical movement bindings.");
+            Logger.LogInfo(
+                "Keyboard bow aiming enabled with Ori 1 keyboard Bash response. "
+                + "It follows the game's Horizontal/Vertical movement bindings.");
         }
 
         private void OnDestroy()
@@ -87,12 +75,21 @@ namespace AeternaKeyboardAim
     {
         private const int HorizontalActionId = 0;
         private const int VerticalActionId = 1;
+        private const float OriInputThreshold = 0.2f;
+        private const float OriKeyboardAcceleration = 2000f;
+        private const float OriVisualLerpFactor = 0.5f;
+        private const float OriFixedStepSeconds = 1f / 60f;
 
         private static bool _keyboardEngaged;
         private static bool _loggedFirstKeyboardInput;
         private static bool _loggedPatchReached;
+        private static bool _keyboardClockwise;
+        private static float _keyboardSpeed;
+        private static float _keyboardAngleDegrees;
+        private static float _displayAngleDegrees;
+        private static float _fixedStepAccumulator;
         private static Vector2 _currentDirection = Vector2.right;
-        private static int _lastRotationFrame = -1;
+        private static int _lastSimulationFrame = -1;
 
         internal static Vector2 GetAimDirection(MouseAimingHUD mouseAimingHud)
         {
@@ -133,8 +130,7 @@ namespace AeternaKeyboardAim
             string inputSource;
             Vector2 requestedDirection = ReadRequestedDirection(player, out inputSource);
 
-            float deadZone = Mathf.Clamp01(Plugin.InputDeadZone.Value);
-            bool hasDirectionInput = requestedDirection.sqrMagnitude > deadZone * deadZone;
+            bool hasDirectionInput = requestedDirection.magnitude > OriInputThreshold;
 
             if (!_keyboardEngaged)
             {
@@ -143,7 +139,7 @@ namespace AeternaKeyboardAim
                     return;
                 }
 
-                _currentDirection = GetInitialDirection(__result);
+                InitializeOriAimState(GetInitialDirection(__result));
                 _keyboardEngaged = true;
 
                 if (!_loggedFirstKeyboardInput)
@@ -154,23 +150,81 @@ namespace AeternaKeyboardAim
                 }
             }
 
-            if (hasDirectionInput && _lastRotationFrame != Time.frameCount)
+            if (_lastSimulationFrame != Time.frameCount)
             {
-                _lastRotationFrame = Time.frameCount;
-                requestedDirection.Normalize();
-                float maxRadiansDelta = Mathf.Max(0f, Plugin.RotationSpeed.Value)
-                    * Mathf.Deg2Rad
-                    * Time.unscaledDeltaTime;
-
-                _currentDirection = Vector3.RotateTowards(
-                    _currentDirection,
-                    requestedDirection,
-                    maxRadiansDelta,
-                    0f);
-                _currentDirection.Normalize();
+                _lastSimulationFrame = Time.frameCount;
+                AdvanceOriAim(requestedDirection, hasDirectionInput);
             }
 
             __result = _currentDirection;
+        }
+
+        private static void InitializeOriAimState(Vector2 initialDirection)
+        {
+            _currentDirection = initialDirection.normalized;
+            _keyboardAngleDegrees = DirectionToAngle(_currentDirection);
+            _displayAngleDegrees = _keyboardAngleDegrees;
+            _keyboardSpeed = 0f;
+            _keyboardClockwise = false;
+            _fixedStepAccumulator = 0f;
+            _lastSimulationFrame = -1;
+        }
+
+        private static void AdvanceOriAim(Vector2 requestedDirection, bool hasDirectionInput)
+        {
+            // Ori DE evaluates keyboard Bash aiming from FixedUpdate. Its normal
+            // physics setting is 60 Hz; unscaled time preserves that real-time
+            // response while Aeterna Noctis slows gameplay to 20% during aiming.
+            _fixedStepAccumulator += Time.unscaledDeltaTime;
+
+            while (_fixedStepAccumulator >= OriFixedStepSeconds)
+            {
+                StepOriAim(requestedDirection, hasDirectionInput);
+                _fixedStepAccumulator -= OriFixedStepSeconds;
+            }
+        }
+
+        private static void StepOriAim(Vector2 requestedDirection, bool hasDirectionInput)
+        {
+            if (hasDirectionInput)
+            {
+                float targetAngle = DirectionToAngle(requestedDirection);
+                float angleDelta = Mathf.DeltaAngle(_keyboardAngleDegrees, targetAngle);
+                float previousDirectionSign = _keyboardClockwise ? 1f : -1f;
+
+                if (Mathf.Sign(angleDelta) != previousDirectionSign)
+                {
+                    _keyboardClockwise = Mathf.Sign(angleDelta) > 0f;
+                    _keyboardSpeed = 0f;
+                }
+
+                _keyboardSpeed += Mathf.Min(
+                    Mathf.Abs(angleDelta),
+                    OriFixedStepSeconds * OriKeyboardAcceleration);
+                _keyboardAngleDegrees = Mathf.MoveTowardsAngle(
+                    _keyboardAngleDegrees,
+                    targetAngle,
+                    _keyboardSpeed * OriFixedStepSeconds);
+            }
+            else
+            {
+                _keyboardSpeed = 0f;
+            }
+
+            _displayAngleDegrees = Mathf.LerpAngle(
+                _displayAngleDegrees,
+                _keyboardAngleDegrees,
+                OriVisualLerpFactor);
+
+            float angleRadians = _displayAngleDegrees * Mathf.Deg2Rad;
+            _currentDirection = new Vector2(
+                Mathf.Cos(angleRadians),
+                Mathf.Sin(angleRadians));
+        }
+
+        private static float DirectionToAngle(Vector2 direction)
+        {
+            return Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
         }
 
         private static Vector2 ReadRequestedDirection(Player player, out string source)
@@ -269,8 +323,13 @@ namespace AeternaKeyboardAim
         internal static void Reset()
         {
             _keyboardEngaged = false;
+            _keyboardClockwise = false;
+            _keyboardSpeed = 0f;
+            _keyboardAngleDegrees = 0f;
+            _displayAngleDegrees = 0f;
+            _fixedStepAccumulator = 0f;
             _currentDirection = Vector2.right;
-            _lastRotationFrame = -1;
+            _lastSimulationFrame = -1;
         }
 
         internal static bool TryUpdateStandaloneDirection(

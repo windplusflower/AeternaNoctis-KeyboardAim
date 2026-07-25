@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0
+
+- Replaced fixed-speed rotation with the Ori and the Blind Forest: Definitive
+  Edition keyboard Bash aiming response.
+- Matched the normal 60 Hz update cadence, 0.2 digital-input threshold,
+  2000-degree acceleration term, direction-reversal speed reset, and 0.5
+  displayed-angle interpolation.
+- Movement keys now select a target direction: taps nudge the aim, holding
+  converges on that direction, and releasing preserves the selected angle.
+- Removed the rotation-speed and dead-zone options so stale settings cannot
+  change the Ori response. Older config entries are ignored.
+
 ## 1.0.8
 
 - Set keyboard aiming to a fixed 60 degrees per second.
