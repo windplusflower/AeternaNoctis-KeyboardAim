@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0
+
+- Added configurable keyboard aim assist for arrow-specific mechanisms:
+  `LightArrow` to `LightSwitchTrigger`, `DarkArrow` to
+  `DarkPlatformController`, `TrueSightArrow` to `TrueSightPlatform`, and
+  `FrostArrow` to `FrostPlatformController`.
+- Enemy colliders are never candidates. Blood arrows and teleport arrows have
+  no dedicated mechanism target and therefore do not auto-lock.
+- Increased the default acquisition cone to 30 degrees, the release cone to
+  45 degrees, and the maximum range to 32 world units.
+- Added a platform line-of-sight check and full target-center snapping.
+- Replaced the vanilla enemy auto-aim path for keyboard arrows, including when
+  the CrosshairBob auto-aim perk is equipped.
+
 ## 1.1.0
 
 - Replaced fixed-speed rotation with the Ori and the Blind Forest: Definitive

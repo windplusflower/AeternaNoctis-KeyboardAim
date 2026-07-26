@@ -15,13 +15,16 @@ namespace AeternaKeyboardAim
     {
         public const string PluginGuid = "cn.codex.aeternanoctis.keyboardaim";
         public const string PluginName = "Aeterna Noctis Keyboard Aim";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.2.0";
 
         internal static ConfigEntry<bool> EnableWasdFallback;
         internal static ConfigEntry<KeyCode> FallbackUpKey;
         internal static ConfigEntry<KeyCode> FallbackDownKey;
         internal static ConfigEntry<KeyCode> FallbackLeftKey;
         internal static ConfigEntry<KeyCode> FallbackRightKey;
+        internal static ConfigEntry<bool> EnableInteractionAimAssist;
+        internal static ConfigEntry<float> InteractionAssistAngle;
+        internal static ConfigEntry<float> InteractionAssistRange;
         internal static ManualLogSource Log;
 
         private Harmony _harmony;
@@ -41,15 +44,33 @@ namespace AeternaKeyboardAim
             FallbackLeftKey = Config.Bind("Fallback Keys", "Left", KeyCode.A, "Fallback key for aiming left.");
             FallbackRightKey = Config.Bind("Fallback Keys", "Right", KeyCode.D, "Fallback key for aiming right.");
 
+            EnableInteractionAimAssist = Config.Bind(
+                "Interaction Aim Assist",
+                "Enabled",
+                true,
+                "Snap keyboard arrow aim only to mechanisms activated by the selected arrow type.");
+            InteractionAssistAngle = Config.Bind(
+                "Interaction Aim Assist",
+                "MaxAngleDegrees",
+                30f,
+                "Maximum angle between the current aim and a matching mechanism. Valid range: 0-90.");
+            InteractionAssistRange = Config.Bind(
+                "Interaction Aim Assist",
+                "MaxDistance",
+                32f,
+                "Maximum world-space distance for matching-mechanism aim assist. Valid range: 0.5-100.");
+
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll(typeof(BowAimCallPatch));
             _harmony.PatchAll(typeof(AimResetPatch));
+            _harmony.PatchAll(typeof(InteractionVanillaAutoAimPatch));
             _harmony.PatchAll(typeof(ShootDirectionPatch));
             _harmony.PatchAll(typeof(BowControllerUpdatePatch));
 
             Logger.LogInfo(
                 "Keyboard bow aiming enabled with Ori 1 keyboard Bash response. "
-                + "It follows the game's Horizontal/Vertical movement bindings.");
+                + "It follows the game's Horizontal/Vertical movement bindings. "
+                + "Arrow interaction aim assist targets matching mechanisms only.");
         }
 
         private void OnDestroy()
@@ -89,12 +110,16 @@ namespace AeternaKeyboardAim
         private static float _displayAngleDegrees;
         private static float _fixedStepAccumulator;
         private static Vector2 _currentDirection = Vector2.right;
+        private static Vector2 _latchedDirection = Vector2.right;
         private static int _lastSimulationFrame = -1;
 
         internal static Vector2 GetAimDirection(MouseAimingHUD mouseAimingHud)
         {
             Vector2 result = mouseAimingHud.AimDirection;
-            UseMovementBindingsForBowAim(ref result, "mouse/keyboard");
+            UseMovementBindingsForBowAim(
+                ref result,
+                "mouse/keyboard",
+                null);
             return result;
         }
 
@@ -104,11 +129,17 @@ namespace AeternaKeyboardAim
             int verticalActionId)
         {
             Vector2 result = player.GetAxis2DRaw(horizontalActionId, verticalActionId);
-            UseMovementBindingsForBowAim(ref result, "controller");
+            UseMovementBindingsForBowAim(
+                ref result,
+                "controller",
+                null);
             return result;
         }
 
-        private static void UseMovementBindingsForBowAim(ref Vector2 __result, string runtimeRoute)
+        private static void UseMovementBindingsForBowAim(
+            ref Vector2 __result,
+            string runtimeRoute,
+            BowController bowController)
         {
             if (!ReInput.isReady)
             {
@@ -156,12 +187,18 @@ namespace AeternaKeyboardAim
                 AdvanceOriAim(requestedDirection, hasDirectionInput);
             }
 
-            __result = _currentDirection;
+            _latchedDirection = _currentDirection;
+            ArrowInteractionAimAssist.TryAdjustDirection(
+                bowController ?? KingVariables._bowController,
+                _currentDirection,
+                out _latchedDirection);
+            __result = _latchedDirection;
         }
 
         private static void InitializeOriAimState(Vector2 initialDirection)
         {
             _currentDirection = initialDirection.normalized;
+            _latchedDirection = _currentDirection;
             _keyboardAngleDegrees = DirectionToAngle(_currentDirection);
             _displayAngleDegrees = _keyboardAngleDegrees;
             _keyboardSpeed = 0f;
@@ -329,22 +366,430 @@ namespace AeternaKeyboardAim
             _displayAngleDegrees = 0f;
             _fixedStepAccumulator = 0f;
             _currentDirection = Vector2.right;
+            _latchedDirection = Vector2.right;
             _lastSimulationFrame = -1;
+            ArrowInteractionAimAssist.ResetLock();
         }
 
         internal static bool TryUpdateStandaloneDirection(
+            BowController bowController,
             Vector2 originalDirection,
             out Vector2 direction)
         {
-            UseMovementBindingsForBowAim(ref originalDirection, "standalone LateUpdate");
+            UseMovementBindingsForBowAim(
+                ref originalDirection,
+                "standalone LateUpdate",
+                bowController);
             direction = originalDirection;
             return _keyboardEngaged;
         }
 
-        internal static bool TryGetLatchedDirection(out Vector2 direction)
+        internal static bool TryGetLatchedDirection(
+            BowController bowController,
+            out Vector2 direction)
         {
-            direction = _currentDirection;
+            _latchedDirection = _currentDirection;
+            ArrowInteractionAimAssist.TryAdjustDirection(
+                bowController,
+                _currentDirection,
+                out _latchedDirection);
+            direction = _latchedDirection;
             return _keyboardEngaged;
+        }
+
+        internal static bool KeyboardEngaged => _keyboardEngaged;
+    }
+
+    internal static class ArrowInteractionAimAssist
+    {
+        private enum InteractionKind
+        {
+            None,
+            LightSwitch,
+            DarkPlatform,
+            TrueSightPlatform,
+            FrostPlatform
+        }
+
+        private const float TargetRefreshSeconds = 0.25f;
+        private const float ReleaseAnglePadding = 15f;
+        private const float RaycastEndTolerance = 0.15f;
+
+        private static readonly FieldInfo TriggerEnabledField =
+            AccessTools.Field(typeof(LightSwitchTrigger), "_triggerEnabled");
+
+        private static readonly FieldInfo SelectedArrowField =
+            AccessTools.Field(typeof(BowController), "_selectedArrow");
+
+        private static readonly FieldInfo ShootPointField =
+            AccessTools.Field(typeof(BowController), "shootPoint");
+
+        private static readonly RaycastHit2D[] ObstacleHits =
+            new RaycastHit2D[8];
+
+        private static readonly List<Component> Targets =
+            new List<Component>();
+
+        private static readonly HashSet<InteractionKind> LoggedKinds =
+            new HashSet<InteractionKind>();
+
+        private static Component _lockedTarget;
+        private static InteractionKind _lockedKind;
+        private static InteractionKind _cachedKind;
+        private static float _nextTargetRefreshTime;
+
+        internal static bool HasDedicatedInteraction(
+            BowController bowController)
+        {
+            return GetInteractionKind(bowController)
+                != InteractionKind.None;
+        }
+
+        internal static bool TryAdjustDirection(
+            BowController bowController,
+            Vector2 rawDirection,
+            out Vector2 adjustedDirection)
+        {
+            adjustedDirection = rawDirection;
+
+            InteractionKind kind = GetInteractionKind(bowController);
+            if (!Plugin.EnableInteractionAimAssist.Value
+                || kind == InteractionKind.None
+                || rawDirection.sqrMagnitude <= 0.0001f)
+            {
+                ResetLock();
+                return false;
+            }
+
+            float maxAngle = Mathf.Clamp(
+                Plugin.InteractionAssistAngle.Value,
+                0f,
+                90f);
+            float maxDistance = Mathf.Clamp(
+                Plugin.InteractionAssistRange.Value,
+                0.5f,
+                100f);
+            Vector2 origin = GetAimOrigin(bowController);
+            Vector2 normalizedRawDirection = rawDirection.normalized;
+
+            if (TryUseLockedTarget(
+                kind,
+                origin,
+                normalizedRawDirection,
+                maxAngle + ReleaseAnglePadding,
+                maxDistance,
+                out adjustedDirection))
+            {
+                return true;
+            }
+
+            RefreshTargetsIfNeeded(kind);
+
+            Component bestTarget = null;
+            Vector2 bestDirection = rawDirection;
+            float bestAngle = float.PositiveInfinity;
+            float bestDistance = float.PositiveInfinity;
+
+            foreach (Component target in Targets)
+            {
+                if (!TryGetCandidate(
+                    kind,
+                    target,
+                    origin,
+                    normalizedRawDirection,
+                    maxAngle,
+                    maxDistance,
+                    out Vector2 candidateDirection,
+                    out float candidateAngle,
+                    out float candidateDistance))
+                {
+                    continue;
+                }
+
+                if (candidateAngle < bestAngle - 0.01f
+                    || (Mathf.Abs(candidateAngle - bestAngle) <= 0.01f
+                        && candidateDistance < bestDistance))
+                {
+                    bestTarget = target;
+                    bestDirection = candidateDirection;
+                    bestAngle = candidateAngle;
+                    bestDistance = candidateDistance;
+                }
+            }
+
+            if (bestTarget == null)
+            {
+                return false;
+            }
+
+            _lockedTarget = bestTarget;
+            _lockedKind = kind;
+            adjustedDirection = bestDirection;
+
+            if (LoggedKinds.Add(kind))
+            {
+                Plugin.Log?.LogInfo(
+                    $"Arrow interaction aim assist acquired {kind}; "
+                    + "enemy colliders are never searched.");
+            }
+
+            return true;
+        }
+
+        internal static void ResetLock()
+        {
+            _lockedTarget = null;
+            _lockedKind = InteractionKind.None;
+        }
+
+        private static bool TryUseLockedTarget(
+            InteractionKind kind,
+            Vector2 origin,
+            Vector2 rawDirection,
+            float releaseAngle,
+            float maxDistance,
+            out Vector2 direction)
+        {
+            if (_lockedKind == kind
+                && TryGetCandidate(
+                kind,
+                _lockedTarget,
+                origin,
+                rawDirection,
+                Mathf.Clamp(releaseAngle, 0f, 90f),
+                maxDistance,
+                out direction,
+                out _,
+                out _))
+            {
+                return true;
+            }
+
+            _lockedTarget = null;
+            direction = rawDirection;
+            return false;
+        }
+
+        private static bool TryGetCandidate(
+            InteractionKind kind,
+            Component target,
+            Vector2 origin,
+            Vector2 rawDirection,
+            float maxAngle,
+            float maxDistance,
+            out Vector2 direction,
+            out float angle,
+            out float distance)
+        {
+            direction = rawDirection;
+            angle = float.PositiveInfinity;
+            distance = float.PositiveInfinity;
+
+            if (!IsAvailable(kind, target)
+                || !TryGetTargetPoint(target, out Vector2 targetPoint))
+            {
+                return false;
+            }
+
+            Vector2 offset = targetPoint - origin;
+            distance = offset.magnitude;
+            if (distance <= 0.001f || distance > maxDistance)
+            {
+                return false;
+            }
+
+            direction = offset / distance;
+            angle = Vector2.Angle(rawDirection, direction);
+            if (angle > maxAngle
+                || IsObstructed(
+                    origin,
+                    direction,
+                    distance,
+                    target))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsAvailable(
+            InteractionKind kind,
+            Component target)
+        {
+            if (target == null
+                || !target.gameObject.activeInHierarchy)
+            {
+                return false;
+            }
+
+            Behaviour behaviour = target as Behaviour;
+            if (behaviour != null && !behaviour.isActiveAndEnabled)
+            {
+                return false;
+            }
+
+            if (kind == InteractionKind.LightSwitch
+                && target is LightSwitchTrigger lightSwitch
+                && TriggerEnabledField != null
+                && (bool)TriggerEnabledField.GetValue(lightSwitch))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryGetTargetPoint(
+            Component target,
+            out Vector2 targetPoint)
+        {
+            Collider2D collider = target.GetComponent<Collider2D>();
+            if (collider != null && collider.enabled)
+            {
+                targetPoint = collider.bounds.center;
+                return true;
+            }
+
+            foreach (Collider2D childCollider
+                in target.GetComponentsInChildren<Collider2D>())
+            {
+                if (childCollider != null
+                    && childCollider.enabled
+                    && childCollider.gameObject.activeInHierarchy)
+                {
+                    targetPoint = childCollider.bounds.center;
+                    return true;
+                }
+            }
+
+            targetPoint = target.transform.position;
+            return true;
+        }
+
+        private static bool IsObstructed(
+            Vector2 origin,
+            Vector2 direction,
+            float distance,
+            Component target)
+        {
+            int blockerMask = LayerMask.GetMask(
+                "Platforms",
+                "MovingPlatforms");
+            int hitCount = Physics2D.RaycastNonAlloc(
+                origin,
+                direction,
+                ObstacleHits,
+                distance,
+                blockerMask);
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                Collider2D collider = ObstacleHits[i].collider;
+                if (collider == null
+                    || collider.transform == target.transform
+                    || collider.transform.IsChildOf(target.transform)
+                    || target.transform.IsChildOf(collider.transform)
+                    || ObstacleHits[i].distance
+                        >= distance - RaycastEndTolerance)
+                {
+                    continue;
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static Vector2 GetAimOrigin(BowController bowController)
+        {
+            Transform shootPoint =
+                ShootPointField?.GetValue(bowController) as Transform;
+            return shootPoint != null
+                ? (Vector2)shootPoint.position
+                : (Vector2)bowController.transform.position;
+        }
+
+        private static InteractionKind GetInteractionKind(
+            BowController bowController)
+        {
+            if (bowController == null || SelectedArrowField == null)
+            {
+                return InteractionKind.None;
+            }
+
+            GameObject selectedArrow =
+                SelectedArrowField.GetValue(bowController) as GameObject;
+            if (selectedArrow == null)
+            {
+                return InteractionKind.None;
+            }
+
+            switch (selectedArrow.tag)
+            {
+                case "LightArrow":
+                    return InteractionKind.LightSwitch;
+                case "DarkArrow":
+                    return InteractionKind.DarkPlatform;
+                case "TrueSightArrow":
+                    return InteractionKind.TrueSightPlatform;
+                case "FrostArrow":
+                    return InteractionKind.FrostPlatform;
+                default:
+                    return InteractionKind.None;
+            }
+        }
+
+        private static void RefreshTargetsIfNeeded(
+            InteractionKind kind)
+        {
+            if (kind == _cachedKind
+                && Time.unscaledTime < _nextTargetRefreshTime)
+            {
+                return;
+            }
+
+            _cachedKind = kind;
+            _nextTargetRefreshTime =
+                Time.unscaledTime + TargetRefreshSeconds;
+            Targets.Clear();
+
+            switch (kind)
+            {
+                case InteractionKind.LightSwitch:
+                    AddTargets(
+                        UnityEngine.Object
+                            .FindObjectsOfType<LightSwitchTrigger>());
+                    break;
+                case InteractionKind.DarkPlatform:
+                    AddTargets(
+                        UnityEngine.Object
+                            .FindObjectsOfType<DarkPlatformController>());
+                    break;
+                case InteractionKind.TrueSightPlatform:
+                    AddTargets(
+                        UnityEngine.Object
+                            .FindObjectsOfType<TrueSightPlatform>());
+                    break;
+                case InteractionKind.FrostPlatform:
+                    AddTargets(
+                        UnityEngine.Object
+                            .FindObjectsOfType<FrostPlatformController>());
+                    break;
+            }
+        }
+
+        private static void AddTargets<T>(T[] targets)
+            where T : Component
+        {
+            foreach (T target in targets)
+            {
+                if (target != null)
+                {
+                    Targets.Add(target);
+                }
+            }
         }
     }
 
@@ -421,6 +866,50 @@ namespace AeternaKeyboardAim
         }
     }
 
+    [HarmonyPatch(typeof(BowController), "TryAutoAim")]
+    internal static class InteractionVanillaAutoAimPatch
+    {
+        private static readonly FieldInfo AimField =
+            AccessTools.Field(typeof(BowController), "_aim");
+
+        [HarmonyPrefix]
+        private static bool ReplaceEnemyAutoAimForKeyboardArrows(
+            BowController __instance,
+            ref bool __result)
+        {
+            if (!Plugin.EnableInteractionAimAssist.Value
+                || ReInput.controllers.GetLastActiveControllerType()
+                    != ControllerType.Keyboard)
+            {
+                return true;
+            }
+
+            Vector2 facingDirection =
+                KingVariables._Character != null
+                    && !KingVariables._Character.IsFacingRight
+                ? Vector2.left
+                : Vector2.right;
+
+            if (ArrowInteractionAimAssist.TryAdjustDirection(
+                __instance,
+                facingDirection,
+                out Vector2 direction))
+            {
+                AimField.SetValue(__instance, direction);
+                __result = true;
+            }
+            else
+            {
+                __result = false;
+            }
+
+            // Vanilla TryAutoAim enumerates EnemySceneHealths. Replacing it
+            // here guarantees that keyboard arrow assist never selects an
+            // enemy, even when the CrosshairBob perk is equipped.
+            return false;
+        }
+    }
+
     internal static class StandaloneAimController
     {
         private static readonly FieldInfo AimField = AccessTools.Field(typeof(BowController), "_aim");
@@ -487,7 +976,10 @@ namespace AeternaKeyboardAim
 
             _wasAiming = true;
             Vector2 originalDirection = (Vector2)AimField.GetValue(bowController);
-            if (AimDirectionPatch.TryUpdateStandaloneDirection(originalDirection, out Vector2 direction))
+            if (AimDirectionPatch.TryUpdateStandaloneDirection(
+                bowController,
+                originalDirection,
+                out Vector2 direction))
             {
                 ApplyDirection(bowController, direction);
             }
@@ -519,7 +1011,9 @@ namespace AeternaKeyboardAim
         internal static void ApplyLatchedDirection(BowController bowController)
         {
             if (bowController != null
-                && AimDirectionPatch.TryGetLatchedDirection(out Vector2 direction))
+                && AimDirectionPatch.TryGetLatchedDirection(
+                    bowController,
+                    out Vector2 direction))
             {
                 ApplyDirection(bowController, direction);
             }

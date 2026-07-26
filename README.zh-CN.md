@@ -5,9 +5,14 @@
 这是一个面向《Aeterna Noctis》的 BepInEx 5 辅助功能 Mod，为弓箭时停瞄准补充
 完整的键盘方向控制。
 
-进入弓箭的时停瞄准后，可以使用当前移动键平滑旋转瞄准方向。1.1.0 版按
+进入弓箭的时停瞄准后，可以使用当前移动键平滑旋转瞄准方向。1.2.0 版按
 《奥日与黑暗森林：终极版》普通 60 Hz 物理模式的键盘猛击公式实现：方向键给出
 目标方向，短按微调，长按平滑收敛，到达目标角后停止。
+
+带有专属机关的箭还会自动吸附对应机关：光箭对应光箭开关，暗箭对应暗平台，
+真视箭对应真视平台，冰箭对应冰平台。任何箭都不会锁定敌人。默认进入吸附的
+角度为 ±30°、保持吸附至 ±45°，最大距离为 32 个世界单位，并且不会穿过平台
+锁定。
 
 > 这是非官方社区 Mod，与 Aeternum Game Studios 无关。
 
@@ -20,6 +25,8 @@
 - 短按只转动一小段，长按会逐渐对准所按的方向。
 - 松开移动键后保持当前角度。
 - 每次拉弓期间，只有按下键盘方向后才由键盘接管，不改变原有鼠标和手柄操作。
+- 只按当前箭种搜索相匹配的专属机关，不会把怪物作为候选目标。
+- 血箭没有专属机关；传送箭使用普通地形作为落点，因此这两种箭不自动吸附。
 
 ## 兼容性
 
@@ -45,7 +52,7 @@
 
 1. 退出游戏。
 2. 从最新 Release 下载
-   `AeternaNoctis-KeyboardAim-v1.1.0-FullPack.zip`。
+   `AeternaNoctis-KeyboardAim-v1.2.0-FullPack.zip`。
 3. 在 Steam 中右键《Aeterna Noctis》，选择
    **管理 > 浏览本地文件**。
 4. 把 ZIP 内的全部内容直接解压到包含 `Aeterna Noctis.exe` 的游戏根目录。
@@ -62,7 +69,7 @@ Aeterna Noctis\BepInEx\plugins\AeternaKeyboardAim.dll
 ### ModOnly
 
 1. 确认 BepInEx 5 已经安装，并且至少启动过一次。
-2. 下载 `AeternaNoctis-KeyboardAim-v1.1.0-ModOnly.zip`。
+2. 下载 `AeternaNoctis-KeyboardAim-v1.2.0-ModOnly.zip`。
 3. 将它解压到游戏目录；也可以单独把 `AeternaKeyboardAim.dll` 复制到：
 
 ```text
@@ -93,6 +100,19 @@ BepInEx\config\cn.codex.aeternanoctis.keyboardaim.cfg
 | --- | ---: | --- |
 | `EnableFallbackKeys` | `true` | 游戏屏蔽移动动作时，直接读取备用按键。 |
 | `Up`、`Down`、`Left`、`Right` | `W`、`S`、`A`、`D` | 直接读取的备用方向键。 |
+| `Enabled` | `true` | 开关箭种专属机关吸附。 |
+| `MaxAngleDegrees` | `30` | 准星与对应机关方向允许的最大夹角。 |
+| `MaxDistance` | `32` | 机关吸附的最大世界空间距离。 |
+
+### 游戏设置中的“自动瞄准”
+
+游戏设置里的这个开关实际保存为 `HaveBowCrosshair`，只控制跟班显示的瞄准激光
+或辅助线，不会改变发射角度，也不会搜索目标。
+
+原版真正的目标自动选择来自 `CrosshairBob`（准星鲍勃）物品：
+`BowController.TryAutoAim()` 会在瞄准向量为零时寻找最近且无遮挡的存活敌人。
+本 Mod 在键盘瞄准时替换这条敌人搜索，所以即使装备该物品，也只会寻找与当前
+箭种匹配的专属机关。
 
 为了保持与《奥日》一致，转向曲线和输入阈值从 1.1.0 起使用原作常数，不再允许
 单独调速。旧配置文件里的 `RotationSpeedDegreesPerSecond` 和 `InputDeadZone`

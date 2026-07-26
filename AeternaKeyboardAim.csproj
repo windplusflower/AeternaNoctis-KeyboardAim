@@ -5,9 +5,9 @@
     <Nullable>disable</Nullable>
     <AssemblyName>AeternaKeyboardAim</AssemblyName>
     <RootNamespace>AeternaKeyboardAim</RootNamespace>
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
     <GameDir Condition="'$(GameDir)' == ''">$(AETERNA_NOCTIS_GAME_DIR)</GameDir>
     <ManagedDir>$(GameDir)\Aeterna Noctis_Data\Managed</ManagedDir>
     <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(GameDir)\BepInEx\core</BepInExCoreDir>
@@ -36,6 +36,10 @@
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.Physics2DModule">
+      <HintPath>$(ManagedDir)\UnityEngine.Physics2DModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
