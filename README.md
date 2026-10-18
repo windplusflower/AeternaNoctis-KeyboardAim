@@ -6,7 +6,7 @@ A BepInEx 5 accessibility and quality-of-life mod that adds smooth, fully
 keyboard-controlled bow aiming to **Aeterna Noctis**.
 
 While the bow's slow-motion aiming is active, use your movement bindings to
-rotate the aim in any direction. Version 1.2.0 implements the keyboard Bash
+rotate the aim in any direction. Version 1.2.1 implements the keyboard Bash
 response from Ori and the Blind Forest: Definitive Edition's normal 60 Hz
 physics mode: keys select a target direction, taps nudge the arrow, and a held
 direction converges smoothly before stopping on the target angle.
@@ -29,7 +29,9 @@ target acquisition.
 - Reproduces Ori's keyboard Bash acceleration, reversal reset, and displayed
   arrow-angle interpolation.
 - Treats the pressed direction as a target angle rather than a fixed angular
-  velocity, without snapping instantly.
+  velocity.
+- Holding movement keys when entering aim points directly towards that direction;
+  pressing directions mid-aim smoothly turns towards them.
 - A tap moves the aim a short distance; holding converges on the pressed
   direction.
 - Keeps the selected angle when the movement keys are released.
@@ -64,7 +66,7 @@ and choose one of these files:
 ### FullPack — recommended
 
 1. Exit the game.
-2. Download `AeternaNoctis-KeyboardAim-v1.2.0-FullPack.zip` from the latest
+2. Download `AeternaNoctis-KeyboardAim-v1.2.1-FullPack.zip` from the latest
    Release.
 3. In Steam, right-click **Aeterna Noctis** and select
    **Manage > Browse local files**.
@@ -84,7 +86,7 @@ creates its folders and configuration files.
 ### ModOnly
 
 1. Make sure BepInEx 5 is already installed and has been launched at least once.
-2. Download `AeternaNoctis-KeyboardAim-v1.2.0-ModOnly.zip`.
+2. Download `AeternaNoctis-KeyboardAim-v1.2.1-ModOnly.zip`.
 3. Extract it into the game folder, or copy `AeternaKeyboardAim.dll` to:
 
 ```text

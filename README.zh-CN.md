@@ -5,7 +5,7 @@
 这是一个面向《Aeterna Noctis》的 BepInEx 5 辅助功能 Mod，为弓箭时停瞄准补充
 完整的键盘方向控制。
 
-进入弓箭的时停瞄准后，可以使用当前移动键平滑旋转瞄准方向。1.2.0 版按
+进入弓箭的时停瞄准后，可以使用当前移动键平滑旋转瞄准方向。1.2.1 版按
 《奥日与黑暗森林：终极版》普通 60 Hz 物理模式的键盘猛击公式实现：方向键给出
 目标方向，短按微调，长按平滑收敛，到达目标角后停止。
 
@@ -21,7 +21,8 @@
 - 使用游戏当前设置的水平、垂直移动键。
 - 游戏在瞄准时屏蔽移动动作的情况下，直接读取备用 `W`、`A`、`S`、`D`。
 - 复现《奥日》键盘猛击的加速转向、反向重置速度和箭头角度插值。
-- 方向键指定目标角，而不是控制固定角速度；不会瞬间吸附。
+- 方向键指定目标角，而不是控制固定角速度。
+- 起手按住方向键进入瞄准时直接指向所按方向；中途按键时平滑转向目标角。
 - 短按只转动一小段，长按会逐渐对准所按的方向。
 - 松开移动键后保持当前角度。
 - 每次拉弓期间，只有按下键盘方向后才由键盘接管，不改变原有鼠标和手柄操作。
@@ -52,7 +53,7 @@
 
 1. 退出游戏。
 2. 从最新 Release 下载
-   `AeternaNoctis-KeyboardAim-v1.2.0-FullPack.zip`。
+   `AeternaNoctis-KeyboardAim-v1.2.1-FullPack.zip`。
 3. 在 Steam 中右键《Aeterna Noctis》，选择
    **管理 > 浏览本地文件**。
 4. 把 ZIP 内的全部内容直接解压到包含 `Aeterna Noctis.exe` 的游戏根目录。
@@ -69,7 +70,7 @@ Aeterna Noctis\BepInEx\plugins\AeternaKeyboardAim.dll
 ### ModOnly
 
 1. 确认 BepInEx 5 已经安装，并且至少启动过一次。
-2. 下载 `AeternaNoctis-KeyboardAim-v1.2.0-ModOnly.zip`。
+2. 下载 `AeternaNoctis-KeyboardAim-v1.2.1-ModOnly.zip`。
 3. 将它解压到游戏目录；也可以单独把 `AeternaKeyboardAim.dll` 复制到：
 
 ```text

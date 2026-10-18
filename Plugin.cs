@@ -15,7 +15,7 @@ namespace AeternaKeyboardAim
     {
         public const string PluginGuid = "cn.codex.aeternanoctis.keyboardaim";
         public const string PluginName = "Aeterna Noctis Keyboard Aim";
-        public const string PluginVersion = "1.2.0";
+        public const string PluginVersion = "1.2.1";
 
         internal static ConfigEntry<bool> EnableWasdFallback;
         internal static ConfigEntry<KeyCode> FallbackUpKey;
@@ -66,6 +66,8 @@ namespace AeternaKeyboardAim
             _harmony.PatchAll(typeof(InteractionVanillaAutoAimPatch));
             _harmony.PatchAll(typeof(ShootDirectionPatch));
             _harmony.PatchAll(typeof(BowControllerUpdatePatch));
+            _harmony.PatchAll(typeof(BowControllerLateUpdatePatch));
+            _harmony.PatchAll(typeof(CancelShootResetPatch));
 
             Logger.LogInfo(
                 "Keyboard bow aiming enabled with Ori 1 keyboard Bash response. "
@@ -102,6 +104,7 @@ namespace AeternaKeyboardAim
         private const float OriFixedStepSeconds = 1f / 60f;
 
         private static bool _keyboardEngaged;
+        private static bool _initialAimEvaluated;
         private static bool _loggedFirstKeyboardInput;
         private static bool _loggedPatchReached;
         private static bool _keyboardClockwise;
@@ -162,6 +165,8 @@ namespace AeternaKeyboardAim
             Vector2 requestedDirection = ReadRequestedDirection(player, out inputSource);
 
             bool hasDirectionInput = requestedDirection.magnitude > OriInputThreshold;
+            bool isInitialAimFrame = !_initialAimEvaluated;
+            _initialAimEvaluated = true;
 
             if (!_keyboardEngaged)
             {
@@ -170,7 +175,10 @@ namespace AeternaKeyboardAim
                     return;
                 }
 
-                InitializeOriAimState(GetInitialDirection(__result));
+                Vector2 initialDirection = isInitialAimFrame
+                    ? requestedDirection
+                    : GetInitialDirection(__result);
+                InitializeOriAimState(initialDirection);
                 _keyboardEngaged = true;
 
                 if (!_loggedFirstKeyboardInput)
@@ -360,6 +368,7 @@ namespace AeternaKeyboardAim
         internal static void Reset()
         {
             _keyboardEngaged = false;
+            _initialAimEvaluated = false;
             _keyboardClockwise = false;
             _keyboardSpeed = 0f;
             _keyboardAngleDegrees = 0f;
@@ -861,7 +870,7 @@ namespace AeternaKeyboardAim
             BowController bowController = KingVariables._bowController;
             if (bowController == null || !bowController.IsAiming)
             {
-                AimDirectionPatch.Reset();
+                StandaloneAimController.ResetAimState();
             }
         }
     }
@@ -1050,14 +1059,24 @@ namespace AeternaKeyboardAim
             {
                 crossFather.transform.rotation = rotation;
             }
+
+            if (KingVariables._minion != null && bowController.IsAiming)
+            {
+                KingVariables._minion.transform.rotation = rotation;
+            }
+        }
+
+        internal static void ResetAimState()
+        {
+            AimDirectionPatch.Reset();
+            _wasAiming = false;
         }
 
         private static void EndAimIfNeeded()
         {
             if (_wasAiming)
             {
-                AimDirectionPatch.Reset();
-                _wasAiming = false;
+                ResetAimState();
             }
         }
     }
@@ -1070,6 +1089,12 @@ namespace AeternaKeyboardAim
         {
             StandaloneAimController.ApplyLatchedDirection(__instance);
         }
+
+        [HarmonyPostfix]
+        private static void ResetAfterShot()
+        {
+            StandaloneAimController.ResetAimState();
+        }
     }
 
     [HarmonyPatch(typeof(BowController), "Update")]
@@ -1081,6 +1106,29 @@ namespace AeternaKeyboardAim
             StandaloneAimController.UpdateAfterBowController(
                 __instance,
                 "BowController.Update postfix");
+        }
+    }
+
+    [HarmonyPatch(typeof(BowController), "LateUpdate")]
+    internal static class BowControllerLateUpdatePatch
+    {
+        [HarmonyPostfix]
+        private static void LockAimDirectionAfterBowLateUpdate(BowController __instance)
+        {
+            if (__instance != null && __instance.IsAiming)
+            {
+                StandaloneAimController.ApplyLatchedDirection(__instance);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(BowController), nameof(BowController.CancelShoot))]
+    internal static class CancelShootResetPatch
+    {
+        [HarmonyPostfix]
+        private static void ResetAfterCancel()
+        {
+            StandaloneAimController.ResetAimState();
         }
     }
 }

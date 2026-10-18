@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.1
+
+- Holding a movement direction when entering bow aim now initializes the aim
+  directly to that pressed direction instead of starting forward and rotating
+  towards it.
+- Starting bow aim without a held movement key still defaults to facing
+  forward and smoothly rotates when movement keys are pressed mid-aim.
+- Synchronized the companion aiming laser (`KingVariables._minion`) rotation
+  in `LateUpdate` and on shot reset so the visual guide line points in the
+  initial direction on frame 0 without sweeping from the front.
+
 ## 1.2.0
 
 - Added configurable keyboard aim assist for arrow-specific mechanisms:
